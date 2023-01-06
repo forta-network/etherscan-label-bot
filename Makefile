@@ -1,6 +1,6 @@
 .PHONY: build push-dev push publish-dev publish
 
-TAG = go-agent:latest
+TAG = etherscan-label-bot:latest
 DEV_REPO = disco-dev.forta.network
 REPO = disco.forta.network
 
