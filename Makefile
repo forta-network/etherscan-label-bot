@@ -1,11 +1,14 @@
 .PHONY: build push-dev push publish-dev publish
 
-TAG = etherscan-label-bot:latest
+TS := $(shell /bin/date "+%s")
+TAG = etherscan-label-bot-${TS}
 DEV_REPO = disco-dev.forta.network
 REPO = disco.forta.network
 
 build:
 	@docker build -t ${TAG} .
+	@docker tag ${TAG} ${DEV_REPO}/${TAG}
+	@docker tag ${TAG} ${REPO}/${TAG}
 
 push-dev:
 	@docker tag ${TAG} ${DEV_REPO}/${TAG}

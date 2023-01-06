@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -26,7 +26,6 @@ var ScopeScanner Scope = "scanner"
 
 type client struct {
 	jwtProviderUrl string
-	botID          string
 }
 
 func (c *client) Put(scope Scope, objID string, payload []byte) error {
@@ -96,7 +95,7 @@ func (c *client) Get(scope Scope, objID string) ([]byte, error) {
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("response %d", resp.StatusCode)
 	}
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +126,8 @@ func (c *client) token() (string, error) {
 	return jwtResp.Token, nil
 }
 
-func NewClient(botID, jwtProviderHost, jwtProviderPort string) (Client, error) {
+func NewClient(jwtProviderHost, jwtProviderPort string) (Client, error) {
 	return &client{
-		botID:          botID,
 		jwtProviderUrl: fmt.Sprintf("http://%s:%s/create", jwtProviderHost, jwtProviderPort),
 	}, nil
 }

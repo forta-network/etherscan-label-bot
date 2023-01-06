@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"forta-network/go-agent/botdb"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -40,14 +42,24 @@ type Agent struct {
 }
 
 func (a *Agent) getDb() (map[string]*AddressReport, error) {
+	if a.db == nil {
+		db, err := botdb.NewClient(os.Getenv("FORTA_JWT_PROVIDER_HOST"), os.Getenv("FORTA_JWT_PROVIDER_PORT"))
+		if err != nil {
+			log.WithError(err).Error("error initializing bot db")
+			return nil, err
+		}
+		a.db = db
+	}
 	saved, err := a.db.Get(botdb.ScopeBot, dbName)
 	if err == botdb.ErrNotFound {
 		return make(map[string]*AddressReport), nil
 	} else if err != nil {
+		log.WithError(err).Error("error getting bot db")
 		return nil, err
 	}
 	var savedDb map[string]*AddressReport
 	if err := json.Unmarshal(saved, &savedDb); err != nil {
+		log.WithError(err).Error("error unmarshaling saved db")
 		return nil, err
 	}
 	return savedDb, nil
@@ -58,6 +70,7 @@ func (a *Agent) saveDb(db map[string]*AddressReport) error {
 	if err != nil {
 		return err
 	}
+	log.Info("save db")
 	return a.db.Put(botdb.ScopeBot, dbName, b)
 }
 
@@ -121,21 +134,20 @@ func (a *Agent) checkAddress(chainID string, addr string) []string {
 		result = append(result, checkPage(fmt.Sprintf(p, addr))...)
 	}
 	result = uniq(result)
-	if len(result) > 0 {
-		a.mux.Lock()
-		defer a.mux.Unlock()
-		if s, ok := a.state[addr]; !ok {
-			a.state[addr] = &AddressReport{
-				LastChecked: time.Now().UTC(),
-				Labels:      result,
-			}
-		} else {
-			s.Merge(&AddressReport{
-				LastChecked: time.Now().UTC(),
-				Labels:      result,
-			})
+	a.mux.Lock()
+	defer a.mux.Unlock()
+	if s, ok := a.state[addr]; !ok {
+		a.state[addr] = &AddressReport{
+			LastChecked: time.Now().UTC(),
+			Labels:      result,
 		}
+	} else {
+		s.Merge(&AddressReport{
+			LastChecked: time.Now().UTC(),
+			Labels:      result,
+		})
 	}
+
 	return result
 }
 
@@ -150,6 +162,7 @@ func (a *Agent) syncDb() error {
 
 	// initialize to savedDb
 	if a.state == nil {
+		log.Info("initializing local state")
 		a.state = savedDb
 		return nil
 	}
@@ -172,6 +185,7 @@ func (a *Agent) Initialize(ctx context.Context, request *protocol.InitializeRequ
 }
 
 func errorMsg(msg string) *protocol.EvaluateTxResponse {
+	log.WithError(errors.New(msg)).Error("error while processing")
 	return &protocol.EvaluateTxResponse{
 		Status: protocol.ResponseStatus_ERROR,
 		Errors: []*protocol.Error{
@@ -192,7 +206,12 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 	grp, ctx := errgroup.WithContext(ctx)
 	addresses := make(chan string)
 	var result []*protocol.Label
-	for i := 0; i < 10; i++ {
+	workers := 10
+	if workers > len(request.Event.Addresses) {
+		workers = len(request.Event.Addresses)
+	}
+
+	for i := 0; i < workers; i++ {
 		grp.Go(func() error {
 			for address := range addresses {
 				ls := a.checkAddress(request.Event.Network.ChainId, address)
@@ -220,10 +239,12 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 	})
 
 	if err := grp.Wait(); err != nil {
+		log.WithError(err).Error("error from errgroup")
 		return errorMsg(err.Error()), nil
 	}
 
 	if len(result) > 0 {
+		log.Info("returning finding")
 		return &protocol.EvaluateTxResponse{
 			Status: protocol.ResponseStatus_SUCCESS,
 			Findings: []*protocol.Finding{
@@ -255,7 +276,7 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 }
 
 func (a *Agent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlockRequest) (*protocol.EvaluateBlockResponse, error) {
-	if time.Since(a.lastSync) > 1*time.Hour {
+	if time.Since(a.lastSync) > 5*time.Minute {
 		if err := a.syncDb(); err != nil {
 			log.WithError(err).Error("error syncing database")
 			return &protocol.EvaluateBlockResponse{
@@ -267,6 +288,7 @@ func (a *Agent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlo
 				},
 			}, nil
 		}
+		log.Info("synced db")
 		a.lastSync = time.Now().UTC()
 	}
 
