@@ -84,6 +84,11 @@ func checkPage(url string) []string {
 			result = append(result, l)
 		}
 	}
+	if len(result) > 0 {
+		logger.WithFields(log.Fields{
+			"labels": strings.Join(result, ","),
+		}).Info("found labels")
+	}
 	return result
 }
 
@@ -232,7 +237,7 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 						"timestamp": time.Now().UTC().Format(time.RFC3339),
 					},
 					Labels:      result,
-					Description: "Risky Addresses Detected",
+					Description: "a risky address was detected",
 				},
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -250,7 +255,6 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 }
 
 func (a *Agent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlockRequest) (*protocol.EvaluateBlockResponse, error) {
-
 	if time.Since(a.lastSync) > 1*time.Hour {
 		if err := a.syncDb(); err != nil {
 			log.WithError(err).Error("error syncing database")
