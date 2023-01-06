@@ -124,8 +124,10 @@ func (a *Agent) checkAddress(chainID string, addr string) []string {
 	}
 	a.mux.Lock()
 	if s, ok := a.state[addr]; ok {
-		a.mux.Unlock()
-		return s.Labels
+		if time.Since(s.LastChecked) < 24*time.Hour {
+			a.mux.Unlock()
+			return s.Labels
+		}
 	}
 	a.mux.Unlock()
 

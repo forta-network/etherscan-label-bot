@@ -5,6 +5,9 @@ TAG = etherscan-label-bot-${TS}
 DEV_REPO = disco-dev.forta.network
 REPO = disco.forta.network
 
+test:
+	go test ./...
+
 build:
 	@docker build -t ${TAG} .
 	@docker tag ${TAG} ${DEV_REPO}/${TAG}
