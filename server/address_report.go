@@ -7,7 +7,7 @@ import (
 
 type AddressReport struct {
 	LastChecked time.Time `json:"lastChecked"`
-	Labels      []string  `json:"labels"`
+	Labels      []string  `json:"detectedLabels"`
 }
 
 func (ar *AddressReport) Merge(other *AddressReport) {

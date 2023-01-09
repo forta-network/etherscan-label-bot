@@ -11,6 +11,7 @@ import (
 const phishAddress = "0x4d30774eba5421e79626e747948505fd280e4ac0"
 const heistAddress = "0x14ec0cd2acee4ce37260b925f74648127a889a28"
 const tether = "0xdac17f958d2ee523a2206206994597c13d831ec7"
+const existing = "0xd2b1a0e2e733c7c2621963b183e7c769c7e1a94c"
 
 func labelExists(finding *protocol.Finding, l *protocol.Label) bool {
 	for _, label := range finding.Labels {
@@ -29,6 +30,7 @@ func TestAgent_EvaluateTx(t *testing.T) {
 			phishAddress: true,
 			heistAddress: true,
 			tether:       true,
+			existing:     true,
 		},
 	}
 	a := &Agent{

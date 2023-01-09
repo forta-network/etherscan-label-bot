@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"forta-network/go-agent/botdb"
+	label_api "forta-network/go-agent/label-api"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"github.com/forta-network/forta-core-go/protocol"
 )
 
-var labels = []string{
+var detectedLabels = []string{
 	"heist", "exploit", "phish / hack",
 }
 
@@ -31,7 +32,15 @@ var urlPatterns = map[string][]string{
 	},
 }
 
-const dbName = "labels.json"
+const dbName = "labels.json.gz"
+
+func getBotID() string {
+	botID := os.Getenv("FORTA_BOT_ID")
+	if botID == "" {
+		return "0x6f022d4a65f397dffd059e269e1c2b5004d822f905674dbf518d968f744c2ede"
+	}
+	return botID
+}
 
 type Agent struct {
 	protocol.UnimplementedAgentServer
@@ -52,6 +61,7 @@ func (a *Agent) getDb() (map[string]*AddressReport, error) {
 	}
 	saved, err := a.db.Get(botdb.ScopeBot, dbName)
 	if err == botdb.ErrNotFound {
+		log.WithError(err).Warn("could not get db, initializing new one...")
 		return make(map[string]*AddressReport), nil
 	} else if err != nil {
 		log.WithError(err).Error("error getting bot db")
@@ -92,7 +102,7 @@ func checkPage(url string) []string {
 	}
 	body := strings.ToLower(string(b))
 	var result []string
-	for _, l := range labels {
+	for _, l := range detectedLabels {
 		if strings.Contains(body, fmt.Sprintf(labelPattern, l)) {
 			result = append(result, l)
 		}
@@ -177,6 +187,14 @@ func (a *Agent) syncDb() error {
 			savedReport.Merge(report)
 		}
 	}
+	// merge saved db into local state
+	for addr, report := range savedDb {
+		if localReport, ok := a.state[addr]; !ok {
+			a.state[addr] = report
+		} else {
+			localReport.Merge(report)
+		}
+	}
 	return a.saveDb(savedDb)
 }
 
@@ -196,6 +214,56 @@ func errorMsg(msg string) *protocol.EvaluateTxResponse {
 			},
 		},
 	}
+}
+
+func (a *Agent) filterOutDuplicates(ls []*protocol.Label) ([]*protocol.Label, []*protocol.Label) {
+	c := label_api.NewClient(nil)
+	var result []*protocol.Label
+	var duplicates []*protocol.Label
+	for _, proposed := range ls {
+		// this invokes multiple times because it's technically faster than most alternatives
+		existing, err := c.GetLabels(&label_api.GetLabelsRequest{
+			SourceIDs: []string{getBotID()},
+			Entities:  []string{proposed.Entity},
+			Labels:    []string{proposed.Label},
+			Limit:     1,
+		})
+		if err != nil {
+			log.WithError(err).Error("error getting labels for duplicate detection (ignoring to avoid downtime)")
+			return ls, nil
+		}
+		if len(existing) > 0 {
+			log.WithFields(log.Fields{
+				"label":  proposed.Label,
+				"entity": proposed.Entity,
+			}).Info("label already exists (avoiding duplicate)")
+			duplicates = append(duplicates, proposed)
+		} else {
+			result = append(result, proposed)
+		}
+	}
+	return result, duplicates
+}
+
+func summarizeToMap(ls []*protocol.Label) map[string]string {
+	res := make(map[string]string)
+	addrMap := make(map[string][]string)
+	for _, r := range ls {
+		if _, ok := addrMap[r.Entity]; !ok {
+			addrMap[r.Entity] = []string{r.Label}
+		} else {
+			addrMap[r.Entity] = append(addrMap[r.Entity], r.Label)
+		}
+	}
+	for addr, labelList := range addrMap {
+		res[addr] = strings.Join(labelList, "|")
+	}
+	return res
+}
+
+func toJson(i interface{}) string {
+	b, _ := json.Marshal(i)
+	return string(b)
 }
 
 func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequest) (*protocol.EvaluateTxResponse, error) {
@@ -247,20 +315,30 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 
 	if len(result) > 0 {
 		log.Info("returning finding")
+
+		newLabels, duplicates := a.filterOutDuplicates(result)
+
+		newMap := summarizeToMap(newLabels)
+		dupeMap := summarizeToMap(duplicates)
+
+		md := map[string]string{
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			"added":      toJson(newMap),
+			"duplicates": toJson(dupeMap),
+		}
+
 		return &protocol.EvaluateTxResponse{
 			Status: protocol.ResponseStatus_SUCCESS,
 			Findings: []*protocol.Finding{
 				{
-					Protocol: "ethereum",
-					Severity: protocol.Finding_HIGH,
-					Type:     protocol.Finding_SUSPICIOUS,
-					AlertId:  "risky-address-label",
-					Name:     "Risky Address",
-					Metadata: map[string]string{
-						"timestamp": time.Now().UTC().Format(time.RFC3339),
-					},
-					Labels:      result,
-					Description: "a risky address was detected",
+					Protocol:    "ethereum",
+					Severity:    protocol.Finding_HIGH,
+					Type:        protocol.Finding_SUSPICIOUS,
+					AlertId:     "risky-address-label",
+					Name:        "Risky Address",
+					Metadata:    md,
+					Labels:      newLabels,
+					Description: fmt.Sprintf("risky address, %d new, %d dupes", len(newLabels), len(duplicates)),
 				},
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

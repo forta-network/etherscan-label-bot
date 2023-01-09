@@ -2,11 +2,14 @@ package botdb
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const urlPattern = "https://research.forta.network/database/%s/%s"
@@ -28,8 +31,39 @@ type client struct {
 	jwtProviderUrl string
 }
 
+func gzipBytes(b []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write(b)
+	if err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func gunzipBytes(b []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(r)
+}
+
 func (c *client) Put(scope Scope, objID string, payload []byte) error {
-	req, err := http.NewRequest("PUT", fmt.Sprintf(urlPattern, scope, objID), bytes.NewReader(payload))
+	pl := payload
+	if strings.HasSuffix(objID, ".gz") {
+		gzipPayload, err := gzipBytes(payload)
+		if err != nil {
+			return err
+		}
+		pl = gzipPayload
+	}
+
+	req, err := http.NewRequest("PUT", fmt.Sprintf(urlPattern, scope, objID), bytes.NewReader(pl))
 	if err != nil {
 		return err
 	}
@@ -92,6 +126,10 @@ func (c *client) Get(scope Scope, objID string) ([]byte, error) {
 	if resp.StatusCode == 404 {
 		return nil, ErrNotFound
 	}
+	if resp.StatusCode == 500 {
+		log.WithError(err).Error("500 error...coercing to 404")
+		return nil, ErrNotFound
+	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("response %d", resp.StatusCode)
 	}
@@ -99,6 +137,14 @@ func (c *client) Get(scope Scope, objID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasSuffix(objID, ".gz") {
+		bts, err := gunzipBytes(b)
+		if err != nil {
+			return nil, err
+		}
+		b = bts
+	}
+
 	return b, nil
 }
 
