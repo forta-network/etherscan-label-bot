@@ -1,0 +1,8 @@
+{
+  "name": "Risky Address Labeler",
+  "version": "0.0.1",
+  "repository": "",
+  "projects": [],
+  "chainIds": [1],
+  "publishedFrom": "Go Bot Template"
+}

@@ -52,7 +52,7 @@ type Agent struct {
 
 func (a *Agent) getDb() (map[string]*AddressReport, error) {
 	if a.db == nil {
-		db, err := botdb.NewClient(os.Getenv("FORTA_JWT_PROVIDER_HOST"), os.Getenv("FORTA_JWT_PROVIDER_PORT"))
+		db, err := botdb.NewClient("https://research.forta.network", os.Getenv("FORTA_JWT_PROVIDER_HOST"), os.Getenv("FORTA_JWT_PROVIDER_PORT"))
 		if err != nil {
 			log.WithError(err).Error("error initializing bot db")
 			return nil, err

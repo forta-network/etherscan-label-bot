@@ -9,10 +9,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
-const urlPattern = "https://research.forta.network/database/%s/%s"
+const urlPattern = "%s/database/%s/%s"
 
 var ErrNotFound = errors.New("not found")
 
@@ -28,6 +29,7 @@ var ScopeBot Scope = "bot"
 var ScopeScanner Scope = "scanner"
 
 type client struct {
+	apiHost        string
 	jwtProviderUrl string
 }
 
@@ -63,7 +65,7 @@ func (c *client) Put(scope Scope, objID string, payload []byte) error {
 		pl = gzipPayload
 	}
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf(urlPattern, scope, objID), bytes.NewReader(pl))
+	req, err := http.NewRequest("PUT", fmt.Sprintf(urlPattern, c.apiHost, scope, objID), bytes.NewReader(pl))
 	if err != nil {
 		return err
 	}
@@ -86,7 +88,7 @@ func (c *client) Put(scope Scope, objID string, payload []byte) error {
 }
 
 func (c *client) Del(scope Scope, objID string) error {
-	req, err := http.NewRequest("DELETE", fmt.Sprintf(urlPattern, scope, objID), nil)
+	req, err := http.NewRequest("DELETE", fmt.Sprintf(urlPattern, c.apiHost, scope, objID), nil)
 	if err != nil {
 		return err
 	}
@@ -109,7 +111,7 @@ func (c *client) Del(scope Scope, objID string) error {
 }
 
 func (c *client) Get(scope Scope, objID string) ([]byte, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf(urlPattern, scope, objID), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf(urlPattern, c.apiHost, scope, objID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +174,13 @@ func (c *client) token() (string, error) {
 	return jwtResp.Token, nil
 }
 
-func NewClient(jwtProviderHost, jwtProviderPort string) (Client, error) {
+func NewDefaultClient(apiHost string) (Client, error) {
+	return NewClient(apiHost, os.Getenv("FORTA_JWT_PROVIDER_HOST"), os.Getenv("FORTA_JWT_PROVIDER_PORT"))
+}
+
+func NewClient(apiHost, jwtProviderHost, jwtProviderPort string) (Client, error) {
 	return &client{
+		apiHost:        apiHost,
 		jwtProviderUrl: fmt.Sprintf("http://%s:%s/create", jwtProviderHost, jwtProviderPort),
 	}, nil
 }
