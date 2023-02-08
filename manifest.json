@@ -4,5 +4,11 @@
   "repository": "",
   "projects": [],
   "chainIds": [1],
-  "publishedFrom": "Go Bot Template"
+  "publishedFrom": "Go Bot Template",
+  "chainSettings": {
+    "default": {
+      "target": 6,
+      "shards": 1
+    }
+  }
 }

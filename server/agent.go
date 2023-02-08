@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"forta-network/go-agent/botdb"
 	label_api "forta-network/go-agent/label-api"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -23,7 +22,7 @@ var detectedLabels = []string{
 	"heist", "exploit", "phish / hack",
 }
 
-const labelPattern = `--danger'>%s</span>`
+const labelPattern = `<i class='far fa-hashtag'></i> %s</span>`
 
 var urlPatterns = map[string][]string{
 	"0x1": {
@@ -45,43 +44,9 @@ func getBotID() string {
 type Agent struct {
 	protocol.UnimplementedAgentServer
 	mux      sync.Mutex
-	db       botdb.Client
 	lastSync time.Time
 	state    map[string]*AddressReport
-}
-
-func (a *Agent) getDb() (map[string]*AddressReport, error) {
-	if a.db == nil {
-		db, err := botdb.NewClient("https://research.forta.network", os.Getenv("FORTA_JWT_PROVIDER_HOST"), os.Getenv("FORTA_JWT_PROVIDER_PORT"))
-		if err != nil {
-			log.WithError(err).Error("error initializing bot db")
-			return nil, err
-		}
-		a.db = db
-	}
-	saved, err := a.db.Get(botdb.ScopeBot, dbName)
-	if err == botdb.ErrNotFound {
-		log.WithError(err).Warn("could not get db, initializing new one...")
-		return make(map[string]*AddressReport), nil
-	} else if err != nil {
-		log.WithError(err).Error("error getting bot db")
-		return nil, err
-	}
-	var savedDb map[string]*AddressReport
-	if err := json.Unmarshal(saved, &savedDb); err != nil {
-		log.WithError(err).Error("error unmarshaling saved db")
-		return nil, err
-	}
-	return savedDb, nil
-}
-
-func (a *Agent) saveDb(db map[string]*AddressReport) error {
-	b, err := json.Marshal(db)
-	if err != nil {
-		return err
-	}
-	log.Info("save db")
-	return a.db.Put(botdb.ScopeBot, dbName, b)
+	started  bool
 }
 
 func checkPage(url string) []string {
@@ -163,42 +128,9 @@ func (a *Agent) checkAddress(chainID string, addr string) []string {
 	return result
 }
 
-func (a *Agent) syncDb() error {
-	a.mux.Lock()
-	defer a.mux.Unlock()
-
-	savedDb, err := a.getDb()
-	if err != nil {
-		return err
-	}
-
-	// initialize to savedDb
-	if a.state == nil {
-		log.Info("initializing local state")
-		a.state = savedDb
-		return nil
-	}
-
-	// otherwise merge our state into saved db (add only)
-	for addr, report := range a.state {
-		if savedReport, ok := savedDb[addr]; !ok {
-			savedDb[addr] = report
-		} else {
-			savedReport.Merge(report)
-		}
-	}
-	// merge saved db into local state
-	for addr, report := range savedDb {
-		if localReport, ok := a.state[addr]; !ok {
-			a.state[addr] = report
-		} else {
-			localReport.Merge(report)
-		}
-	}
-	return a.saveDb(savedDb)
-}
-
 func (a *Agent) Initialize(ctx context.Context, request *protocol.InitializeRequest) (*protocol.InitializeResponse, error) {
+	a.state = make(map[string]*AddressReport)
+	log.Info("bot started")
 	return &protocol.InitializeResponse{
 		Status: protocol.ResponseStatus_SUCCESS,
 	}, nil
@@ -267,11 +199,6 @@ func toJson(i interface{}) string {
 }
 
 func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequest) (*protocol.EvaluateTxResponse, error) {
-	if a.state == nil {
-		if err := a.syncDb(); err != nil {
-			return errorMsg(err.Error()), nil
-		}
-	}
 	mux := sync.Mutex{}
 	grp, ctx := errgroup.WithContext(ctx)
 	addresses := make(chan string)
@@ -315,7 +242,6 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 
 	if len(result) > 0 {
 		log.Info("returning finding")
-
 		newLabels, duplicates := a.filterOutDuplicates(result)
 
 		newMap := summarizeToMap(newLabels)
@@ -338,7 +264,7 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 					Name:        "Risky Address",
 					Metadata:    md,
 					Labels:      newLabels,
-					Description: fmt.Sprintf("risky address, %d new, %d dupes", len(newLabels), len(duplicates)),
+					Description: fmt.Sprintf("Risky addresses, %d new, %d dupes", len(newLabels), len(duplicates)),
 				},
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -356,26 +282,23 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 }
 
 func (a *Agent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlockRequest) (*protocol.EvaluateBlockResponse, error) {
-	if time.Since(a.lastSync) > 5*time.Minute {
-		if err := a.syncDb(); err != nil {
-			log.WithError(err).Error("error syncing database")
-			return &protocol.EvaluateBlockResponse{
-				Status: protocol.ResponseStatus_ERROR,
-				Errors: []*protocol.Error{
-					{
-						Message: err.Error(),
-					},
-				},
-			}, nil
-		}
-		log.Info("synced db")
-		a.lastSync = time.Now().UTC()
-	}
-
-	return &protocol.EvaluateBlockResponse{
+	resp := &protocol.EvaluateBlockResponse{
 		Status:    protocol.ResponseStatus_SUCCESS,
-		Findings:  nil,
 		Metadata:  map[string]string{},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}, nil
+	}
+
+	if !a.started {
+		a.started = true
+		resp.Findings = append(resp.Findings, &protocol.Finding{
+			Protocol:    "ethereum",
+			Severity:    protocol.Finding_INFO,
+			Type:        protocol.Finding_INFORMATION,
+			AlertId:     "bot-started",
+			Name:        "✅ Bot Launched",
+			Description: "At start-up, this bot sends this alert",
+		})
+	}
+
+	return resp, nil
 }
