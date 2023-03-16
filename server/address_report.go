@@ -6,8 +6,8 @@ import (
 )
 
 type AddressReport struct {
+	Name        string    `json:"name"`
 	LastChecked time.Time `json:"lastChecked"`
-	Labels      []string  `json:"detectedLabels"`
 	Tags        []string  `json:"tags"`
 }
 
@@ -15,9 +15,14 @@ func (ar *AddressReport) Merge(other *AddressReport) {
 	if ar.LastChecked.Before(other.LastChecked) {
 		ar.LastChecked = other.LastChecked
 	}
-	for _, l := range other.Labels {
-		if !slices.Contains[string](ar.Labels, l) {
-			ar.Labels = append(ar.Labels, l)
+	if ar.Name == "" {
+		ar.Name = other.Name
+	}
+
+	for _, t := range other.Tags {
+		if !slices.Contains[string](ar.Tags, t) {
+			ar.Tags = append(ar.Tags, t)
 		}
 	}
+
 }

@@ -11,16 +11,16 @@ func TestAddressReport_Merge(t *testing.T) {
 	time2 := time.Now().UTC()
 	ar1 := &AddressReport{
 		LastChecked: time1,
-		Labels:      []string{"label1"},
+		Tags:        []string{"label1"},
 	}
 	ar2 := &AddressReport{
 		LastChecked: time2,
-		Labels:      []string{"label1", "label2"},
+		Tags:        []string{"label1", "label2"},
 	}
 	ar1.Merge(ar2)
 
 	assert.Equal(t, &AddressReport{
 		LastChecked: time2,
-		Labels:      []string{"label1", "label2"},
+		Tags:        []string{"label1", "label2"},
 	}, ar1)
 }

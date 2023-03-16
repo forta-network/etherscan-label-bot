@@ -18,20 +18,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var evilLabels = []string{
-	"heist", "exploit", "phish / hack",
-}
-
-const labelPattern = `<i class='far fa-hashtag'></i> %s</span>`
-
 var urlPatterns = map[string][]string{
 	"0x1": {
 		"https://etherscan.io/token/%s",
 		"https://etherscan.io/address/%s",
 	},
 }
-
-const dbName = "labels.json.gz"
 
 func getBotID() string {
 	botID := os.Getenv("FORTA_BOT_ID")
@@ -49,51 +41,52 @@ type Agent struct {
 	started  bool
 }
 
+func extractTags(body string) []string {
+	var result []string
+	tokens := strings.Split(body, "<i class='far fa-hashtag'></i>")
+	if len(tokens) > 1 {
+		for i := 1; i < len(tokens); i++ {
+			result = append(result, strings.TrimSpace(strings.Split(tokens[i], "<")[0]))
+		}
+	}
+	return result
+}
+
+func extractName(body string) string {
+	tokens := strings.Split(body, "public name tag (viewable by anyone)'>")
+	if len(tokens) > 1 {
+		cleaned := strings.Replace(tokens[1], "<span class=\"text-truncate\">", "", 1)
+		name := strings.Split(cleaned, "<")[0]
+		return strings.TrimSpace(name)
+	}
+	return ""
+}
+
+func getBody(url string) (string, error) {
+	res, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	return strings.ToLower(string(b)), err
+}
+
 func checkPage(url string) *AddressReport {
 	logger := log.WithFields(log.Fields{
 		"url": url,
 	})
-
-	res, err := http.Get(url)
+	body, err := getBody(url)
 	if err != nil {
 		logger.WithError(err).Error("error getting page (skipping)")
 		return nil
 	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		logger.WithError(err).Error("error reading body of page (skipping)")
-		return nil
-	}
-	body := strings.ToLower(string(b))
-	var evil []string
-	for _, l := range evilLabels {
-		if strings.Contains(body, fmt.Sprintf(labelPattern, l)) {
-			evil = append(evil, l)
-		}
-	}
-	if len(evil) > 0 {
-		logger.WithFields(log.Fields{
-			"evil": strings.Join(evil, ","),
-		}).Info("found labels")
-	}
 
 	return &AddressReport{
+		Name:        extractName(body),
+		Tags:        extractTags(body),
 		LastChecked: time.Now(),
-		Labels:      evil,
 	}
-}
-
-func uniq(arr []string) []string {
-	uniqMap := make(map[string]bool)
-	var result []string
-	for _, s := range arr {
-		if _, ok := uniqMap[s]; s != "" && !ok {
-			uniqMap[s] = true
-			result = append(result, s)
-		}
-	}
-	return result
 }
 
 func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
@@ -113,7 +106,9 @@ func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
 	rp := &AddressReport{}
 	for _, p := range patterns {
 		ar := checkPage(fmt.Sprintf(p, addr))
-		rp.Merge(ar)
+		if ar != nil {
+			rp.Merge(ar)
+		}
 	}
 	a.mux.Lock()
 	defer a.mux.Unlock()
@@ -210,13 +205,23 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 		grp.Go(func() error {
 			for address := range addresses {
 				ar := a.checkAddress(request.Event.Network.ChainId, address)
-				for _, l := range ar.Labels {
+				for _, t := range ar.Tags {
 					mux.Lock()
 					result = append(result, &protocol.Label{
 						EntityType: protocol.Label_ADDRESS,
 						Entity:     address,
 						Confidence: 1,
-						Label:      l,
+						Label:      strings.ToLower(t),
+					})
+					mux.Unlock()
+				}
+				if ar.Name != "" {
+					mux.Lock()
+					result = append(result, &protocol.Label{
+						EntityType: protocol.Label_ADDRESS,
+						Entity:     address,
+						Confidence: 1,
+						Label:      fmt.Sprintf("name|%s", strings.ReplaceAll(ar.Name, "|", "_")),
 					})
 					mux.Unlock()
 				}
@@ -256,13 +261,13 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 			Findings: []*protocol.Finding{
 				{
 					Protocol:    "ethereum",
-					Severity:    protocol.Finding_HIGH,
-					Type:        protocol.Finding_SUSPICIOUS,
-					AlertId:     "risky-address-label",
-					Name:        "Risky Address",
+					Severity:    protocol.Finding_INFO,
+					Type:        protocol.Finding_INFORMATION,
+					AlertId:     "label-sync",
+					Name:        "Syncing Labels",
 					Metadata:    md,
 					Labels:      newLabels,
-					Description: fmt.Sprintf("Risky addresses, %d new, %d dupes", len(newLabels), len(duplicates)),
+					Description: fmt.Sprintf("Addresses, %d new, %d dupes", len(newLabels), len(duplicates)),
 				},
 			},
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

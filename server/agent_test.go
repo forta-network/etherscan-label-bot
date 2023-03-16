@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/forta-network/forta-core-go/protocol"
 	"github.com/stretchr/testify/assert"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -21,6 +23,20 @@ func labelExists(finding *protocol.Finding, l *protocol.Label) bool {
 		}
 	}
 	return false
+}
+
+func TestExtractName(t *testing.T) {
+	b, err := os.ReadFile("./testfiles/test.html")
+	assert.NoError(t, err)
+	name := extractName(strings.ToLower(string(b)))
+	assert.Equal(t, "0x: token sale", name)
+}
+
+func TestExtractTags(t *testing.T) {
+	b, err := os.ReadFile("./testfiles/yearnhack.html")
+	assert.NoError(t, err)
+	tags := extractTags(strings.ToLower(string(b)))
+	assert.Len(t, tags, 2)
 }
 
 func TestAgent_EvaluateTx(t *testing.T) {
@@ -46,8 +62,14 @@ func TestAgent_EvaluateTx(t *testing.T) {
 	for _, l := range res.Findings[0].Labels {
 		fmt.Println(fmt.Sprintf("%s: %s", l.Entity, l.Label))
 	}
-	assert.Len(t, res.Findings[0].Labels, 2)
+	assert.Len(t, res.Findings[0].Labels, 9)
 
+	assert.True(t, labelExists(res.Findings[0], &protocol.Label{
+		EntityType: protocol.Label_ADDRESS,
+		Entity:     tether,
+		Confidence: 1,
+		Label:      "name|tether: usdt stablecoin",
+	}))
 	assert.True(t, labelExists(res.Findings[0], &protocol.Label{
 		EntityType: protocol.Label_ADDRESS,
 		Entity:     phishAddress,
