@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	label_api "forta-network/go-agent/label-api"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"os"
@@ -15,10 +12,13 @@ import (
 	"sync"
 	"time"
 
+	label_api "forta-network/go-agent/label-api"
 	"github.com/forta-network/forta-core-go/protocol"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
-var detectedLabels = []string{
+var evilLabels = []string{
 	"heist", "exploit", "phish / hack",
 }
 
@@ -49,7 +49,7 @@ type Agent struct {
 	started  bool
 }
 
-func checkPage(url string) []string {
+func checkPage(url string) *AddressReport {
 	logger := log.WithFields(log.Fields{
 		"url": url,
 	})
@@ -66,18 +66,22 @@ func checkPage(url string) []string {
 		return nil
 	}
 	body := strings.ToLower(string(b))
-	var result []string
-	for _, l := range detectedLabels {
+	var evil []string
+	for _, l := range evilLabels {
 		if strings.Contains(body, fmt.Sprintf(labelPattern, l)) {
-			result = append(result, l)
+			evil = append(evil, l)
 		}
 	}
-	if len(result) > 0 {
+	if len(evil) > 0 {
 		logger.WithFields(log.Fields{
-			"labels": strings.Join(result, ","),
+			"evil": strings.Join(evil, ","),
 		}).Info("found labels")
 	}
-	return result
+
+	return &AddressReport{
+		LastChecked: time.Now(),
+		Labels:      evil,
+	}
 }
 
 func uniq(arr []string) []string {
@@ -92,7 +96,7 @@ func uniq(arr []string) []string {
 	return result
 }
 
-func (a *Agent) checkAddress(chainID string, addr string) []string {
+func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
 	patterns, ok := urlPatterns[chainID]
 	if !ok {
 		return nil
@@ -101,31 +105,25 @@ func (a *Agent) checkAddress(chainID string, addr string) []string {
 	if s, ok := a.state[addr]; ok {
 		if time.Since(s.LastChecked) < 24*time.Hour {
 			a.mux.Unlock()
-			return s.Labels
+			return s
 		}
 	}
 	a.mux.Unlock()
 
-	var result []string
+	rp := &AddressReport{}
 	for _, p := range patterns {
-		result = append(result, checkPage(fmt.Sprintf(p, addr))...)
+		ar := checkPage(fmt.Sprintf(p, addr))
+		rp.Merge(ar)
 	}
-	result = uniq(result)
 	a.mux.Lock()
 	defer a.mux.Unlock()
+	rp.LastChecked = time.Now()
 	if s, ok := a.state[addr]; !ok {
-		a.state[addr] = &AddressReport{
-			LastChecked: time.Now().UTC(),
-			Labels:      result,
-		}
+		a.state[addr] = rp
 	} else {
-		s.Merge(&AddressReport{
-			LastChecked: time.Now().UTC(),
-			Labels:      result,
-		})
+		s.Merge(rp)
 	}
-
-	return result
+	return a.state[addr]
 }
 
 func (a *Agent) Initialize(ctx context.Context, request *protocol.InitializeRequest) (*protocol.InitializeResponse, error) {
@@ -211,8 +209,8 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 	for i := 0; i < workers; i++ {
 		grp.Go(func() error {
 			for address := range addresses {
-				ls := a.checkAddress(request.Event.Network.ChainId, address)
-				for _, l := range ls {
+				ar := a.checkAddress(request.Event.Network.ChainId, address)
+				for _, l := range ar.Labels {
 					mux.Lock()
 					result = append(result, &protocol.Label{
 						EntityType: protocol.Label_ADDRESS,

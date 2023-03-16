@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"github.com/forta-network/forta-core-go/protocol"
 	"github.com/stretchr/testify/assert"
 	"sync"
@@ -41,6 +42,10 @@ func TestAgent_EvaluateTx(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Len(t, res.Findings, 1)
+
+	for _, l := range res.Findings[0].Labels {
+		fmt.Println(fmt.Sprintf("%s: %s", l.Entity, l.Label))
+	}
 	assert.Len(t, res.Findings[0].Labels, 2)
 
 	assert.True(t, labelExists(res.Findings[0], &protocol.Label{
