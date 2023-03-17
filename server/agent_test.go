@@ -51,8 +51,8 @@ func TestAgent_EvaluateTx(t *testing.T) {
 		},
 	}
 	a := &Agent{
-		mux:   sync.Mutex{},
-		state: make(map[string]*AddressReport),
+		Mux:   sync.Mutex{},
+		State: make(map[string]*AddressReport),
 	}
 	res, err := a.EvaluateTx(ctx, &protocol.EvaluateTxRequest{Event: tx})
 	assert.NoError(t, err)

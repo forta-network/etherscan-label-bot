@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"forta-network/go-agent/server"
+	"forta-network/go-agent/store"
 	"github.com/forta-network/forta-core-go/protocol"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"net"
 	"os"
+	"sync"
 )
 
 func main() {
@@ -20,7 +23,19 @@ func main() {
 		panic(err)
 	}
 	grpcServer := grpc.NewServer()
-	protocol.RegisterAgentServer(grpcServer, &server.Agent{})
+	secrets, err := store.LoadSecrets()
+	if err != nil {
+		panic(err)
+	}
+	db, err := store.NewLabelStore(context.Background(), os.Getenv("FORTA_BOT_ID"), secrets)
+	if err != nil {
+		panic(err)
+	}
+	protocol.RegisterAgentServer(grpcServer, &server.Agent{
+		State:  make(map[string]*server.AddressReport),
+		Mux:    sync.Mutex{},
+		LStore: db,
+	})
 
 	log.Info("started server")
 	if err := grpcServer.Serve(lis); err != nil {

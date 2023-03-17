@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"forta-network/go-agent/store"
 	"io"
 	"net/http"
 	"os"
@@ -35,10 +36,11 @@ func getBotID() string {
 
 type Agent struct {
 	protocol.UnimplementedAgentServer
-	mux      sync.Mutex
+	Mux      sync.Mutex
 	lastSync time.Time
-	state    map[string]*AddressReport
+	State    map[string]*AddressReport
 	started  bool
+	LStore   store.LabelStore
 }
 
 func extractTags(body string) []string {
@@ -94,14 +96,24 @@ func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
 	if !ok {
 		return nil
 	}
-	a.mux.Lock()
-	if s, ok := a.state[addr]; ok {
-		if time.Since(s.LastChecked) < 24*time.Hour {
-			a.mux.Unlock()
+	a.Mux.Lock()
+	if s, ok := a.State[addr]; ok {
+		if time.Since(s.LastChecked) < 72*time.Hour {
+			a.Mux.Unlock()
 			return s
 		}
 	}
-	a.mux.Unlock()
+	a.Mux.Unlock()
+
+	exists, err := a.LStore.EntityExists(context.Background(), addr)
+	if err != nil {
+		log.WithError(err).Error("error checking for existing entity (ignoring)")
+		return nil
+	}
+	if exists {
+		log.WithField("entity", addr).Info("address exists in cache, skipping")
+		return nil
+	}
 
 	rp := &AddressReport{}
 	for _, p := range patterns {
@@ -110,19 +122,21 @@ func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
 			rp.Merge(ar)
 		}
 	}
-	a.mux.Lock()
-	defer a.mux.Unlock()
+	a.Mux.Lock()
+	defer a.Mux.Unlock()
 	rp.LastChecked = time.Now()
-	if s, ok := a.state[addr]; !ok {
-		a.state[addr] = rp
+	if a.State == nil {
+		a.State = make(map[string]*AddressReport)
+	}
+	if s, ok := a.State[addr]; !ok {
+		a.State[addr] = rp
 	} else {
 		s.Merge(rp)
 	}
-	return a.state[addr]
+	return a.State[addr]
 }
 
 func (a *Agent) Initialize(ctx context.Context, request *protocol.InitializeRequest) (*protocol.InitializeResponse, error) {
-	a.state = make(map[string]*AddressReport)
 	log.Info("bot started")
 	return &protocol.InitializeResponse{
 		Status: protocol.ResponseStatus_SUCCESS,
@@ -146,6 +160,18 @@ func (a *Agent) filterOutDuplicates(ls []*protocol.Label) ([]*protocol.Label, []
 	var result []*protocol.Label
 	var duplicates []*protocol.Label
 	for _, proposed := range ls {
+		l, err := a.LStore.GetLabel(context.Background(), proposed.Entity, proposed.Label)
+		if err != nil {
+			log.WithError(err).Error("error checking cache for duplicate detection (ignoring to avoid downtime)")
+		}
+		if l != nil {
+			log.WithFields(log.Fields{
+				"label":  proposed.Label,
+				"entity": proposed.Entity,
+			}).Info("label already exists in cache (avoiding duplicate)")
+			duplicates = append(duplicates, proposed)
+			continue
+		}
 		// this invokes multiple times because it's technically faster than most alternatives
 		existing, err := c.GetLabels(&label_api.GetLabelsRequest{
 			SourceIDs: []string{getBotID()},
@@ -162,6 +188,11 @@ func (a *Agent) filterOutDuplicates(ls []*protocol.Label) ([]*protocol.Label, []
 				"label":  proposed.Label,
 				"entity": proposed.Entity,
 			}).Info("label already exists (avoiding duplicate)")
+
+			if err := a.LStore.PutLabel(context.Background(), proposed.Entity, proposed.Label); err != nil {
+				log.WithError(err).Error("error syncing existing label to cache (ignoring)")
+			}
+
 			duplicates = append(duplicates, proposed)
 		} else {
 			result = append(result, proposed)
@@ -205,6 +236,9 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 		grp.Go(func() error {
 			for address := range addresses {
 				ar := a.checkAddress(request.Event.Network.ChainId, address)
+				if ar == nil {
+					continue
+				}
 				for _, t := range ar.Tags {
 					mux.Lock()
 					result = append(result, &protocol.Label{
@@ -246,6 +280,12 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 	if len(result) > 0 {
 		log.Info("returning finding")
 		newLabels, duplicates := a.filterOutDuplicates(result)
+
+		for _, l := range newLabels {
+			if err := a.LStore.PutLabel(ctx, l.Entity, l.Label); err != nil {
+				log.WithError(err).Error("error syncing existing label to cache (ignoring)")
+			}
+		}
 
 		newMap := summarizeToMap(newLabels)
 		dupeMap := summarizeToMap(duplicates)

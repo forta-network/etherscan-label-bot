@@ -27,6 +27,7 @@ type Scope string
 
 var ScopeBot Scope = "bot"
 var ScopeScanner Scope = "scanner"
+var ScopeOwner Scope = "owner"
 
 type client struct {
 	apiHost        string
