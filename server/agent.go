@@ -277,9 +277,13 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 		return errorMsg(err.Error()), nil
 	}
 
-	if len(result) > 0 {
-		log.Info("returning finding")
-		newLabels, duplicates := a.filterOutDuplicates(result)
+	newLabels, duplicates := a.filterOutDuplicates(result)
+	if len(newLabels) > 0 {
+		log.WithFields(
+			log.Fields{
+				"tx":     request.Event.Transaction.Hash,
+				"labels": len(newLabels),
+			}).Info("returning finding")
 
 		for _, l := range newLabels {
 			if err := a.LStore.PutLabel(ctx, l.Entity, l.Label); err != nil {

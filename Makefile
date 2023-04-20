@@ -47,7 +47,7 @@ push: init-id
 	@echo ${cid}@sha256:${imageDigest}
 	$(eval manifest = $(shell ./publish-cli publish-metadata --image ${cid}@sha256:${imageDigest} --doc-file docs/README.md --env prod))
 	@echo "pushed metadata to prod: ${manifest}"
-	./publish-cli publish --manifest ${manifest} --env prod
+	./publish-cli publish --manifest ${manifest} --env prod --gas-price 250
 
 disable-dev:
 	./publish-cli disable --env dev

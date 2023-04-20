@@ -7,8 +7,8 @@
   "publishedFrom": "Go Bot Template",
   "chainSettings": {
     "default": {
-      "target": 6,
-      "shards": 1
+      "target": 2,
+      "shards": 20 
     }
   }
 }
