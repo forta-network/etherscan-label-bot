@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"forta-network/go-agent/domain"
+	"forta-network/go-agent/scanner"
 	"forta-network/go-agent/server"
 	"forta-network/go-agent/store"
 	"github.com/forta-network/forta-core-go/protocol"
@@ -10,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -27,12 +30,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	db, err := store.NewLabelStore(context.Background(), os.Getenv("FORTA_BOT_ID"), secrets)
+
+	chainIDEnv := os.Getenv("FORTA_CHAIN_ID")
+	chainID, err := strconv.ParseInt(chainIDEnv, 10, 64)
 	if err != nil {
 		panic(err)
 	}
+
+	db, err := store.NewLabelStore(context.Background(), chainID, os.Getenv("FORTA_BOT_ID"), secrets)
+	if err != nil {
+		panic(err)
+	}
+
+	parser := scanner.NewParser(chainID)
 	protocol.RegisterAgentServer(grpcServer, &server.Agent{
-		State:  make(map[string]*server.AddressReport),
+		State:  make(map[string]*domain.AddressReport),
+		Parser: parser,
 		Mux:    sync.Mutex{},
 		LStore: db,
 	})

@@ -1,4 +1,4 @@
-package server
+package domain
 
 import (
 	"golang.org/x/exp/slices"

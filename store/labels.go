@@ -27,12 +27,17 @@ type LabelStore interface {
 var table = "prod-research-bot-data"
 
 type labelStore struct {
-	botID string
-	db    DynamoDB
+	chainID int64
+	botID   string
+	db      DynamoDB
 }
 
 func (s *labelStore) itemId(entity string) string {
-	return cleanTxt(fmt.Sprintf("%s|etherscan-labels|%s", s.botID, entity))
+	ID := cleanTxt(fmt.Sprintf("%s|etherscan-labels|%s", s.botID, entity))
+	if s.chainID == 1 {
+		return ID
+	}
+	return fmt.Sprintf("%d|%s", s.chainID, ID)
 }
 
 func cleanTxt(txt string) string {
@@ -98,16 +103,20 @@ func (s *labelStore) PutLabel(ctx context.Context, entity, label string) error {
 	return err
 }
 
-func NewLabelStore(ctx context.Context, botID string, secrets *Secrets) (LabelStore, error) {
+func NewLabelStore(ctx context.Context, chainID int64, botID string, secrets *Secrets) (LabelStore, error) {
 	if botID == "" {
 		panic("botID is nil")
+	}
+	if chainID == 0 {
+		panic("chainID is 0")
 	}
 	db, err := NewDynamoDBClient(ctx, secrets)
 	if err != nil {
 		return nil, err
 	}
 	return &labelStore{
-		botID: botID,
-		db:    db,
+		chainID: chainID,
+		botID:   botID,
+		db:      db,
 	}, nil
 }

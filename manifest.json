@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "repository": "",
   "projects": [],
-  "chainIds": [1],
+  "chainIds": [1,56],
   "publishedFrom": "Go Bot Template",
   "chainSettings": {
     "default": {
