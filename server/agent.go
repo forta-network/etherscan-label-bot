@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"forta-network/go-agent/store"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -17,14 +14,11 @@ import (
 	"github.com/forta-network/forta-core-go/protocol"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
-)
 
-var urlPatterns = map[string][]string{
-	"0x1": {
-		"https://etherscan.io/token/%s",
-		"https://etherscan.io/address/%s",
-	},
-}
+	"forta-network/go-agent/domain"
+	"forta-network/go-agent/scanner"
+	"forta-network/go-agent/store"
+)
 
 func getBotID() string {
 	botID := os.Getenv("FORTA_BOT_ID")
@@ -38,62 +32,14 @@ type Agent struct {
 	protocol.UnimplementedAgentServer
 	Mux      sync.Mutex
 	lastSync time.Time
-	State    map[string]*AddressReport
+	State    map[string]*domain.AddressReport
 	started  bool
+	Parser   scanner.Parser
 	LStore   store.LabelStore
 }
 
-func extractTags(body string) []string {
-	var result []string
-	tokens := strings.Split(body, "<i class='far fa-hashtag'></i>")
-	if len(tokens) > 1 {
-		for i := 1; i < len(tokens); i++ {
-			result = append(result, strings.TrimSpace(strings.Split(tokens[i], "<")[0]))
-		}
-	}
-	return result
-}
-
-func extractName(body string) string {
-	tokens := strings.Split(body, "public name tag (viewable by anyone)'>")
-	if len(tokens) > 1 {
-		cleaned := strings.Replace(tokens[1], "<span class=\"text-truncate\">", "", 1)
-		name := strings.Split(cleaned, "<")[0]
-		return strings.TrimSpace(name)
-	}
-	return ""
-}
-
-func getBody(url string) (string, error) {
-	res, err := http.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	return strings.ToLower(string(b)), err
-}
-
-func checkPage(url string) *AddressReport {
-	logger := log.WithFields(log.Fields{
-		"url": url,
-	})
-	body, err := getBody(url)
-	if err != nil {
-		logger.WithError(err).Error("error getting page (skipping)")
-		return nil
-	}
-
-	return &AddressReport{
-		Name:        extractName(body),
-		Tags:        extractTags(body),
-		LastChecked: time.Now(),
-	}
-}
-
-func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
-	patterns, ok := urlPatterns[chainID]
-	if !ok {
+func (a *Agent) checkAddress(addr string) *domain.AddressReport {
+	if a.Parser == nil {
 		return nil
 	}
 	a.Mux.Lock()
@@ -115,18 +61,10 @@ func (a *Agent) checkAddress(chainID string, addr string) *AddressReport {
 		return nil
 	}
 
-	rp := &AddressReport{}
-	for _, p := range patterns {
-		ar := checkPage(fmt.Sprintf(p, addr))
-		if ar != nil {
-			rp.Merge(ar)
-		}
-	}
-	a.Mux.Lock()
-	defer a.Mux.Unlock()
+	rp := scanner.Scan(a.Parser, addr)
 	rp.LastChecked = time.Now()
 	if a.State == nil {
-		a.State = make(map[string]*AddressReport)
+		a.State = make(map[string]*domain.AddressReport)
 	}
 	if s, ok := a.State[addr]; !ok {
 		a.State[addr] = rp
@@ -235,7 +173,7 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 	for i := 0; i < workers; i++ {
 		grp.Go(func() error {
 			for address := range addresses {
-				ar := a.checkAddress(request.Event.Network.ChainId, address)
+				ar := a.checkAddress(address)
 				if ar == nil {
 					continue
 				}
