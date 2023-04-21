@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
 func main() {
@@ -26,20 +27,31 @@ func main() {
 		panic(err)
 	}
 	grpcServer := grpc.NewServer()
-	secrets, err := store.LoadSecrets()
+
+	// try up to 10 times in case there's some race condition
+	var secrets *store.Secrets
+	for i := 0; i < 10; i++ {
+		secrets, err = store.LoadSecrets()
+		if err != nil {
+			log.WithError(err).Warnf("attempt %d, retrying (waiting 5s)", i)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatal("failed to load secrets")
 	}
 
 	chainIDEnv := os.Getenv("FORTA_CHAIN_ID")
 	chainID, err := strconv.ParseInt(chainIDEnv, 10, 64)
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatalf("failed to parse chain id: %s", chainIDEnv)
 	}
 
 	db, err := store.NewLabelStore(context.Background(), chainID, os.Getenv("FORTA_BOT_ID"), secrets)
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatal("failed to init label store")
 	}
 
 	parser := scanner.NewParser(chainID)
