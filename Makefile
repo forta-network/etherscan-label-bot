@@ -5,6 +5,9 @@ TAG = etherscan-labeler-${TS}:latest
 DEV_REPO = disco-dev.forta.network
 REPO = disco.forta.network
 
+test:
+	go test ./...
+
 build-cli:
 	rm -f publish-cli
 	wget https://github.com/forta-network/go-bot-publish-cli/releases/download/v0.0.1/publish-cli
