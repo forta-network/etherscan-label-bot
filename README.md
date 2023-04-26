@@ -11,3 +11,4 @@ https://explorer.forta.network/bot/0x6f022d4a65f397dffd059e269e1c2b5004d822f9056
 - BSC
 - Polygon
 - Arbitrum
+- Optimism

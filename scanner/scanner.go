@@ -103,5 +103,8 @@ func NewParser(chainID int64) Parser {
 	if chainID == 42161 {
 		return &arbitrumParser{}
 	}
+	if chainID == 10 {
+		return &optimismParser{}
+	}
 	return nil
 }
