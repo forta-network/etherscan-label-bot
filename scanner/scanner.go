@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"context"
 
 	"forta-network/go-agent/domain"
+	"github.com/chromedp/chromedp"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,7 +41,25 @@ func getBody(url string) (string, error) {
 	}
 	defer res.Body.Close()
 	b, err := io.ReadAll(res.Body)
-	return strings.ToLower(string(b)), err
+	body := strings.ToLower(string(b))
+	
+	if strings.Contains(body, "just a moment") {
+		ctx, cancel := chromedp.NewContext(context.Background())
+		defer cancel()
+
+		var htmlContent string
+		err2 := chromedp.Run(ctx,
+			chromedp.Navigate(url),
+			chromedp.InnerHTML("html", &htmlContent, chromedp.ByQuery),
+		)
+		if err2 != nil {
+			return "", err2
+		}
+		return strings.ToLower(htmlContent), err2
+	} else {
+		return body, err
+	}
+	
 }
 
 func getReportFromPage(p Parser, url string) *domain.AddressReport {
@@ -76,6 +96,21 @@ func NewParser(chainID int64) Parser {
 	}
 	if chainID == 56 {
 		return &bscParser{}
+	}
+	if chainID == 137 {
+		return &polygonParser{}
+	}
+	if chainID == 42161 {
+		return &arbitrumParser{}
+	}
+	if chainID == 10 {
+		return &optimismParser{}
+	}
+	if chainID == 43114 {
+		return &avalancheParser{}
+	}
+	if chainID == 250 {
+		return &fantomParser{}
 	}
 	return nil
 }
