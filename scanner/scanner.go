@@ -109,5 +109,8 @@ func NewParser(chainID int64) Parser {
 	if chainID == 43114 {
 		return &avalancheParser{}
 	}
+	if chainID == 250 {
+		return &fantomParser{}
+	}
 	return nil
 }
