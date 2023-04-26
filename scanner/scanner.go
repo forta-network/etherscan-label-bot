@@ -100,5 +100,8 @@ func NewParser(chainID int64) Parser {
 	if chainID == 137 {
 		return &polygonParser{}
 	}
+	if chainID == 42161 {
+		return &arbitrumParser{}
+	}
 	return nil
 }
