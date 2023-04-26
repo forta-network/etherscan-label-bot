@@ -43,6 +43,14 @@ func TestOptimismScanner_Scan(t *testing.T) {
 				Tags: []string{"token-contract"},
 			},
 		},
+		{
+			Name:    "phishing",
+			Address: "0x7e2d35a00d73a534d4d5508e557e0b1c6e60c977",
+			Expected: &domain.AddressReport{
+				Name: "fake_phishing3",
+				Tags: []string{"phish-hack"},
+			},
+		},
 	}
 	
 	for _, test := range tests {

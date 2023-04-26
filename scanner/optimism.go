@@ -15,13 +15,9 @@ func (p *optimismParser) URLPatterns() []string {
 }
 
 func (p *optimismParser) ExtractTags(body string) []string {
-	// red labels
-	red := extractAllBetween(body, "<span class=\"u-label u-label--xs u-label--danger\">", "<")
-	// blue, yellow & grey labels
-	rest := extractAllBetween(body, "/accounts/label/", "'")
-	result := append(red, rest...)
-	sort.Strings(result)
-	return result
+	labels := extractAllBetween(body, "/accounts/label/", "'")
+	sort.Strings(labels)
+	return labels
 }
  
 func (p *optimismParser) ExtractName(body string) string {

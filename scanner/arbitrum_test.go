@@ -51,6 +51,14 @@ func TestArbitrumScanner_Scan(t *testing.T) {
 				Tags: []string{"defi"},
 			},
 		},
+		{
+			Name:    "phishing",
+			Address: "0x94546e31a8eca3da6143eff3a0012be3af1ba7b8",
+			Expected: &domain.AddressReport{
+				Name: "fake_phishing1",
+				Tags: []string{"phish-hack"},
+			},
+		},
 	}
 	for _, test := range tests {
 		scn := &arbitrumParser{}
