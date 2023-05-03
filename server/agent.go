@@ -14,11 +14,16 @@ import (
 	"github.com/forta-network/forta-core-go/protocol"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	"github.com/chromedp/chromedp"
 
 	"forta-network/go-agent/domain"
+	"forta-network/go-agent/types"
 	"forta-network/go-agent/scanner"
-	"forta-network/go-agent/store"
 )
+
+type myAgent struct {
+	*types.Agent
+}
 
 func getBotID() string {
 	botID := os.Getenv("FORTA_BOT_ID")
@@ -28,17 +33,7 @@ func getBotID() string {
 	return botID
 }
 
-type Agent struct {
-	protocol.UnimplementedAgentServer
-	Mux      sync.Mutex
-	lastSync time.Time
-	State    map[string]*domain.AddressReport
-	started  bool
-	Parser   scanner.Parser
-	LStore   store.LabelStore
-}
-
-func (a *Agent) checkAddress(addr string) *domain.AddressReport {
+func (a *myAgent) checkAddress(addr string) *domain.AddressReport {
 	if a.Parser == nil {
 		return nil
 	}
@@ -61,7 +56,7 @@ func (a *Agent) checkAddress(addr string) *domain.AddressReport {
 		return nil
 	}
 
-	rp := scanner.Scan(a.Parser, addr)
+	rp := scanner.Scan(a.Parser, addr, a.ChromeCtx)
 	rp.LastChecked = time.Now()
 	if a.State == nil {
 		a.State = make(map[string]*domain.AddressReport)
@@ -74,8 +69,10 @@ func (a *Agent) checkAddress(addr string) *domain.AddressReport {
 	return a.State[addr]
 }
 
-func (a *Agent) Initialize(ctx context.Context, request *protocol.InitializeRequest) (*protocol.InitializeResponse, error) {
+func (a *myAgent) Initialize(ctx context.Context, request *protocol.InitializeRequest) (*protocol.InitializeResponse, error) {
 	log.Info("bot started")
+	chromeCtx, _ := chromedp.NewContext(ctx)
+    a.ChromeCtx = chromeCtx
 	return &protocol.InitializeResponse{
 		Status: protocol.ResponseStatus_SUCCESS,
 	}, nil
@@ -93,7 +90,7 @@ func errorMsg(msg string) *protocol.EvaluateTxResponse {
 	}
 }
 
-func (a *Agent) filterOutDuplicates(ls []*protocol.Label) ([]*protocol.Label, []*protocol.Label) {
+func (a *myAgent) filterOutDuplicates(ls []*protocol.Label) ([]*protocol.Label, []*protocol.Label) {
 	c := label_api.NewClient(nil)
 	var result []*protocol.Label
 	var duplicates []*protocol.Label
@@ -160,7 +157,7 @@ func toJson(i interface{}) string {
 	return string(b)
 }
 
-func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequest) (*protocol.EvaluateTxResponse, error) {
+func (a *myAgent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequest) (*protocol.EvaluateTxResponse, error) {
 	mux := sync.Mutex{}
 	grp, ctx := errgroup.WithContext(ctx)
 	addresses := make(chan string)
@@ -266,13 +263,13 @@ func (a *Agent) EvaluateTx(ctx context.Context, request *protocol.EvaluateTxRequ
 
 }
 
-func (a *Agent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlockRequest) (*protocol.EvaluateBlockResponse, error) {
+func (a *myAgent) EvaluateBlock(ctx context.Context, request *protocol.EvaluateBlockRequest) (*protocol.EvaluateBlockResponse, error) {
 	resp := &protocol.EvaluateBlockResponse{
 		Status:    protocol.ResponseStatus_SUCCESS,
 		Metadata:  map[string]string{},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-
+	
 	if !a.started {
 		a.started = true
 		resp.Findings = append(resp.Findings, &protocol.Finding{

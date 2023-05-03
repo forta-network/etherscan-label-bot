@@ -10,19 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+import mytypes "forta-network/go-agent/types"
 
-type Label struct {
-	ItemId  string `dynamodbav:"itemId"`
-	SortKey string `dynamodbav:"sortKey"`
-	Entity  string `dynamodbav:"entity"`
-	Label   string `dynamodbav:"label"`
-}
-
-type LabelStore interface {
-	EntityExists(ctx context.Context, entity string) (bool, error)
-	GetLabel(ctx context.Context, entity, label string) (*Label, error)
-	PutLabel(ctx context.Context, entity, label string) error
-}
 
 var table = "prod-research-bot-data"
 
@@ -63,7 +52,7 @@ func (s *labelStore) EntityExists(ctx context.Context, entity string) (bool, err
 	return res.Count > 0, nil
 }
 
-func (s *labelStore) GetLabel(ctx context.Context, entity, label string) (*Label, error) {
+func (s *labelStore) GetLabel(ctx context.Context, entity, label string) (*mytypes.Label, error) {
 	res, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
 			"itemId":  &types.AttributeValueMemberS{Value: s.itemId(entity)},
@@ -77,7 +66,7 @@ func (s *labelStore) GetLabel(ctx context.Context, entity, label string) (*Label
 	if res.Item == nil {
 		return nil, nil
 	}
-	var result Label
+	var result mytypes.Label
 	if err := attributevalue.UnmarshalMap(res.Item, &result); err != nil {
 		return nil, err
 	}
@@ -85,7 +74,7 @@ func (s *labelStore) GetLabel(ctx context.Context, entity, label string) (*Label
 }
 
 func (s *labelStore) PutLabel(ctx context.Context, entity, label string) error {
-	item, err := attributevalue.MarshalMap(&Label{
+	item, err := attributevalue.MarshalMap(&mytypes.Label{
 		ItemId:  s.itemId(entity),
 		SortKey: cleanTxt(label),
 		Entity:  cleanTxt(entity),
@@ -103,7 +92,7 @@ func (s *labelStore) PutLabel(ctx context.Context, entity, label string) error {
 	return err
 }
 
-func NewLabelStore(ctx context.Context, chainID int64, botID string, secrets *Secrets) (LabelStore, error) {
+func NewLabelStore(ctx context.Context, chainID int64, botID string, secrets *Secrets) (mytypes.LabelStore, error) {
 	if botID == "" {
 		panic("botID is nil")
 	}

@@ -6,6 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"context"
+	"github.com/chromedp/chromedp"
+	
 )
 
 func TestAvalancheScanner_ExtractName(t *testing.T) {
@@ -47,7 +50,9 @@ func TestAvalancheScanner_Scan(t *testing.T) {
 	
 	for _, test := range tests {
 		scn := &avalancheParser{}
-		res := Scan(scn, test.Address)
+		ctx, cancel := chromedp.NewContext(context.Background())
+		defer cancel()
+		res := Scan(scn, test.Address, ctx)
 		if test.Expected == nil {
 			assert.Nil(t, res)
 			continue

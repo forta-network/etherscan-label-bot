@@ -9,15 +9,15 @@ import (
 	"context"
 
 	"forta-network/go-agent/domain"
+	"forta-network/go-agent/types"
 	"github.com/chromedp/chromedp"
 	log "github.com/sirupsen/logrus"
 )
 
-type Parser interface {
-	ExtractName(body string) string
-	ExtractTags(body string) []string
-	URLPatterns() []string
+type myAgent struct {
+	*types.Agent
 }
+
 
 func extractAllBetween(body, prefix, suffix string) []string {
 	var result []string
@@ -34,7 +34,7 @@ func extractAllBetween(body, prefix, suffix string) []string {
 	return result
 }
 
-func getBody(url string) (string, error) {
+func getBody(url string, ctx context.Context) (string, error) {
 	res, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -42,10 +42,7 @@ func getBody(url string) (string, error) {
 	defer res.Body.Close()
 	b, err := io.ReadAll(res.Body)
 	body := strings.ToLower(string(b))
-	
 	if strings.Contains(body, "just a moment") {
-		ctx, cancel := chromedp.NewContext(context.Background())
-		defer cancel()
 
 		var htmlContent string
 		err2 := chromedp.Run(ctx,
@@ -62,11 +59,11 @@ func getBody(url string) (string, error) {
 	
 }
 
-func getReportFromPage(p Parser, url string) *domain.AddressReport {
+func getReportFromPage(p types.Parser, url string, ctx context.Context) *domain.AddressReport {
 	logger := log.WithFields(log.Fields{
 		"url": url,
 	})
-	body, err := getBody(url)
+	body, err := getBody(url, ctx)
 	if err != nil {
 		logger.WithError(err).Error("error getting page (skipping)")
 		return nil
@@ -79,10 +76,10 @@ func getReportFromPage(p Parser, url string) *domain.AddressReport {
 	}
 }
 
-func Scan(p Parser, address string) *domain.AddressReport {
+func Scan(p types.Parser, address string, ctx context.Context) *domain.AddressReport {
 	rp := &domain.AddressReport{}
 	for _, up := range p.URLPatterns() {
-		ar := getReportFromPage(p, fmt.Sprintf(up, address))
+		ar := getReportFromPage(p, fmt.Sprintf(up, address), ctx)
 		if ar != nil {
 			rp.Merge(ar)
 		}
@@ -90,7 +87,7 @@ func Scan(p Parser, address string) *domain.AddressReport {
 	return rp
 }
 
-func NewParser(chainID int64) Parser {
+func NewParser(chainID int64) types.Parser {
 	if chainID == 1 {
 		return &mainnetParser{}
 	}

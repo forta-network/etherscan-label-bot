@@ -6,6 +6,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"context"
+
+	"github.com/chromedp/chromedp"
+
 )
 
 func TestOptimismScanner_ExtractName(t *testing.T) {
@@ -55,7 +59,9 @@ func TestOptimismScanner_Scan(t *testing.T) {
 	
 	for _, test := range tests {
 		scn := &optimismParser{}
-		res := Scan(scn, test.Address)
+		ctx, cancel := chromedp.NewContext(context.Background())
+		defer cancel()
+		res := Scan(scn, test.Address, ctx)
 		if test.Expected == nil {
 			assert.Nil(t, res)
 			continue

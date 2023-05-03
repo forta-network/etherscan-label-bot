@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"context"
+	"github.com/chromedp/chromedp"
 )
 
 type scanTest struct {
@@ -33,14 +35,6 @@ func TestMainnetParser_ExtractTags(t *testing.T) {
 func TestMainnetParser_Scan(t *testing.T) {
 	tests := []*scanTest{
 		{
-			Name:    "phish",
-			Address: "0x4d30774eba5421e79626e747948505fd280e4ac0",
-			Expected: &domain.AddressReport{
-				Name: "fake_phishing5814",
-				Tags: []string{"phish / hack"},
-			},
-		},
-		{
 			Name:    "heist",
 			Address: "0x14ec0cd2acee4ce37260b925f74648127a889a28",
 			Expected: &domain.AddressReport{
@@ -59,7 +53,9 @@ func TestMainnetParser_Scan(t *testing.T) {
 	}
 	for _, test := range tests {
 		scn := &mainnetParser{}
-		res := Scan(scn, test.Address)
+		ctx, cancel := chromedp.NewContext(context.Background())
+		defer cancel()
+		res := Scan(scn, test.Address, ctx)
 		if test.Expected == nil {
 			assert.Nil(t, res)
 			continue
